@@ -39,6 +39,7 @@ def ascii():
     print(" █▄█   █▄█▄▄▄▄▄▄▄█▄▄▄▄▄▄▄█▄▄▄▄▄▄██▄▄▄█▄▄█ █▄▄█ ")
     print("..................................... ver. O.1")
     print("")
+    print("")
 
 ascii()
 # Získání přihlašovacích údajů od uživatele
