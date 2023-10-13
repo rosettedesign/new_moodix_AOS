@@ -6,6 +6,7 @@ from ib_insync import IB, Stock, Future, util, Order
 from ib_insync import MarketOrder
 import logging
 from ib_insync import util
+import asyncio
 
 # logovani
 # util.logToConsole()
@@ -14,9 +15,31 @@ from ib_insync import util
 # Globální seznam pro sledování otevřených obchodů a jejich klouzavých průměrů
 open_trades = []
 
+small_acc = 2000
+mid_acc = 20000
+big_acc = 200000
+
 # Inicializace a připojení k IB
 ib = IB()
-ib.connect('127.0.0.1', 7497, clientId=1)  # IP, port a clientId může být jiný podle vašeho nastavení
+
+
+try:
+    ib.connect('127.0.0.1', 7497, clientId=1)  # IP, port, and clientId might be different based on your setup
+except ConnectionRefusedError:
+    print("Connection to Interactive Brokers refused. Please ensure TWS or IB Gateway is running and correctly configured.")
+    exit()
+except asyncio.exceptions.TimeoutError:
+    print("Connection to Interactive Brokers timed out. Please check your connection and try again.")
+    exit()
+
+managed_accounts = ib.managedAccounts()
+for account in managed_accounts:
+    if account.startswith('DU'):
+        print("Account type: Paper account")
+    elif account.startswith('U'):
+        print("Real account, not allowed!")
+
+
 
 config = {
     'ma_configurations': {
@@ -93,7 +116,7 @@ def select_instrument():
         raise ValueError("Obchodovat lze pouze na USD účtu.")
 
     # Kontrola velikosti účtu a páky
-    if net_liquidation < 5000:
+    if net_liquidation < small_acc:
         raise ValueError("Minimální vklad je 5000$. Aktuální vklad je: " + str(net_liquidation))
 
     # Kontrola maximálního počtu otevřených pozic
@@ -102,9 +125,9 @@ def select_instrument():
         raise ValueError(f"Maximum otevřených pozic je 4. Aktuálně máte {open_positions} otevřených pozic.")
 
     # Výběr instrumentu podle velikosti účtu
-    if 5000 <= net_liquidation < 20000:
+    if small_acc <= net_liquidation < mid_acc:
         return 'SPY'
-    elif 20000 <= net_liquidation < 200000:
+    elif mid_acc <= net_liquidation < big_acc:
         return 'MES'
     else:
         return 'ES'
@@ -283,8 +306,6 @@ def get_main_order_count():
     orders = ib.openOrders()
     main_orders = [order for order in orders if order.orderRef and order.orderRef.startswith('MA')]
     return len(main_orders)
-
-te
 
 # Hlavní smyčka
 print("Spouštím hlavní smyčku...")
