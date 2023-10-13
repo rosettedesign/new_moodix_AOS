@@ -22,11 +22,11 @@ big_acc = 200000
 # Inicializace a připojení k IB
 ib = IB()
 
-
 try:
     ib.connect('127.0.0.1', 7497, clientId=1)  # IP, port, and clientId might be different based on your setup
 except ConnectionRefusedError:
-    print("Connection to Interactive Brokers refused. Please ensure TWS or IB Gateway is running and correctly configured.")
+    print(
+        "Connection to Interactive Brokers refused. Please ensure TWS or IB Gateway is running and correctly configured.")
     exit()
 except asyncio.exceptions.TimeoutError:
     print("Connection to Interactive Brokers timed out. Please check your connection and try again.")
@@ -39,8 +39,6 @@ for account in managed_accounts:
     elif account.startswith('U'):
         print("Real account, not allowed!")
 
-
-
 config = {
     'ma_configurations': {
         72: {'take_profit': 0.02, 'stop_loss': 0.01},  # 2% TP a 1% SL pro MA72
@@ -51,6 +49,7 @@ config = {
     'max_positions': 4,  # Maximální počet otevřených pozic
     # ... další konfigurační data ...
 }
+
 
 def ascii():
     print(" ▄▄   ▄▄ ▄▄▄▄▄▄▄ ▄▄▄▄▄▄▄ ▄▄▄▄▄▄  ▄▄▄ ▄▄   ▄▄ ")
@@ -64,12 +63,11 @@ def ascii():
     print("")
     print("")
 
+
 ascii()
 # Získání přihlašovacích údajů od uživatele
 username = input("Zadejte vás e-mail : ")
 password = input("Zadejte heslo: ")
-
-
 
 
 def get_current_date_string():
@@ -193,7 +191,8 @@ def check_and_open_trade(df, sentiment, instrument):
     max_main_orders = len(config['ma_configurations'])
 
     if main_order_count >= max_main_orders:
-        print(f"Limit hlavních objednávek dosažen: {main_order_count}/{max_main_orders}. Žádné další objednávky nebudou otevřeny.")
+        print(
+            f"Limit hlavních objednávek dosažen: {main_order_count}/{max_main_orders}. Žádné další objednávky nebudou otevřeny.")
         return
 
     for ma_period, ma_values in config['ma_configurations'].items():
@@ -307,6 +306,46 @@ def get_main_order_count():
     main_orders = [order for order in orders if order.orderRef and order.orderRef.startswith('MA')]
     return len(main_orders)
 
+
+def display_open_positions():
+    """
+    Zobrazí otevřené pozice s klouzavým průměrem a jejich zisk/ztrátu.
+    """
+    ma_trades = [trade for trade in ib.trades() if trade.order.orderRef and any(
+        f"MA{ma_period}" in trade.order.orderRef for ma_period in config['ma_configurations'].keys())]
+
+    if not ma_trades:
+        print("Žádné otevřené pozice s klouzavým průměrem.")
+        return
+
+    main_orders = set()
+    for trade in ma_trades:
+        if trade.order.orderId in main_orders:
+            continue
+
+        contract_desc = str(trade.contract)
+        quantity = trade.order.totalQuantity
+        avg_cost = trade.order.lmtPrice
+        market_price = ib.reqTickers(trade.contract)[0].marketPrice()
+        total_value = market_price * quantity
+
+        if trade.order.action == "BUY":
+            unrealized_pnl = (market_price - avg_cost) * quantity
+        else:  # SELL
+            unrealized_pnl = (avg_cost - market_price) * quantity
+
+        print(f"Kontrakt: {contract_desc}")
+        print(f"OrderRef: {trade.order.orderRef}")
+        print(f"Množství: {quantity}")
+        print(f"Průměrná nákladová cena: {avg_cost:.2f}")
+        print(f"Aktuální tržní cena: {market_price:.2f}")
+        print(f"Celková hodnota: {total_value:.2f}")
+        print(f"Nerealizovaný zisk/ztráta: {unrealized_pnl:.2f}")
+        print("-" * 30)
+
+        main_orders.add(trade.order.orderId)
+
+
 # Hlavní smyčka
 print("Spouštím hlavní smyčku...")
 while True:
@@ -317,6 +356,13 @@ while True:
             print("Nepodařilo se načíst sentiment. Čekám na další pokus.")
             time.sleep(60)
             continue
+        trades = ib.trades()
+        for trade in trades:
+            if trade.order.orderRef:
+                print(trade.order.orderRef, trade.contract)
+
+        # Výpis otevřených pozic s klouzavým průměrem
+        display_open_positions()
 
         instrument = select_instrument()
         print(f"Vybraný nástroj pro obchodování: {instrument}")
@@ -328,5 +374,5 @@ while True:
         print("Čekám 5 sekund před dalším cyklem...")
         time.sleep(5)
     except Exception as e:
-        print(f"Chyba při komunikaci s brokerem: {e}")
+        print(f"Chyba při komunikaci s brokerem na API: {e}")
         time.sleep(60)
