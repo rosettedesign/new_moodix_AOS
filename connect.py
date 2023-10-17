@@ -184,8 +184,8 @@ def get_contract_for_instrument(instrument):
         raise ValueError(f"Neznámý instrument: {instrument}")
 
 
-def check_and_open_trade(df, sentiment, instrument):
-    print(f"Kontrola a pokus o otevření obchodu s sentimentem {sentiment} na {instrument}...")
+def check_and_open_trade(df, sentiment, trend, instrument):
+    print(f"Kontrola a pokus o otevření obchodu s sentimentem {sentiment} a trendem {trend} na {instrument}...")
 
     main_order_count = get_main_order_count()
     max_main_orders = len(config['ma_configurations'])
@@ -210,14 +210,14 @@ def check_and_open_trade(df, sentiment, instrument):
             modify_order(existing_order, ma_period, ma_value, ma_values)
             continue
 
-        if sentiment == "RiskOn" and current_price > ma_value:
-            # Otevření long pozice
+        # Podmínky pro otevření long pozice
+        if (sentiment == "RiskOn" and trend in ["Growing", "Sideways"]) and current_price > ma_value:
             trade = place_limit_order('BUY', instrument, ma_period, ma_value, ma_values)
             if trade:
                 open_trades.append(ma_period)
 
-        elif sentiment == "RiskOff" and current_price < ma_value:
-            # Otevření short pozice
+        # Podmínky pro otevření short pozice
+        elif (sentiment == "RiskOff" and trend == "Growing") and current_price < ma_value:
             trade = place_limit_order('SELL', instrument, ma_period, ma_value, ma_values)
             if trade:
                 open_trades.append(ma_period)
@@ -398,7 +398,7 @@ while True:
         print(f"Vybraný nástroj pro obchodování: {instrument}")
         end_date = get_current_date_string()
         df = get_moving_averages(instrument, '7 D', end_date)
-        check_and_open_trade(df, sentiment, instrument)
+        check_and_open_trade(df, sentiment, trend, instrument)
 
         # Počkejte 60 sekund před dalším během smyčky
         print("Čekám 5 sekund před dalším cyklem...")
