@@ -59,7 +59,7 @@ def ascii():
     print(" █       █  █▄█  █  █▄█  █ █▄█   █   ██     █  ")
     print(" █ ██▄██ █       █       █       █   █   ▄   █ ")
     print(" █▄█   █▄█▄▄▄▄▄▄▄█▄▄▄▄▄▄▄█▄▄▄▄▄▄██▄▄▄█▄▄█ █▄▄█ ")
-    print("..................................... ver. O.1")
+    print("..................................... ver. O.2")
     print("")
     print("")
 
@@ -191,8 +191,7 @@ def check_and_open_trade(df, sentiment, instrument):
     max_main_orders = len(config['ma_configurations'])
 
     if main_order_count >= max_main_orders:
-        print(
-            f"Limit hlavních objednávek dosažen: {main_order_count}/{max_main_orders}. Žádné další objednávky nebudou otevřeny.")
+        print(f"Limit hlavních objednávek dosažen: {main_order_count}/{max_main_orders}. Žádné další objednávky nebudou otevřeny.")
         return
 
     for ma_period, ma_values in config['ma_configurations'].items():
@@ -205,6 +204,11 @@ def check_and_open_trade(df, sentiment, instrument):
         # Kontrolní výpis
         print(f"Klouzavý průměr MA{ma_period}: {ma_value}")
         print(f"Aktuální cena: {current_price}")
+
+        existing_order = find_unfilled_order_for_ma(ma_period)
+        if existing_order:
+            modify_order(existing_order, ma_period, ma_value, ma_values)
+            continue
 
         if sentiment == "RiskOn" and current_price > ma_value:
             # Otevření long pozice
@@ -344,6 +348,32 @@ def display_open_positions():
         print("-" * 30)
 
         main_orders.add(trade.order.orderId)
+
+def find_unfilled_order_for_ma(ma_period):
+    """
+    Najde nevyplněnou objednávku pro daný klouzavý průměr.
+    """
+    for order in ib.openOrders():
+        if order.orderRef and f"MA{ma_period}" in order.orderRef and order.status == "Submitted":
+            return order
+    return None
+
+def modify_order(order, ma_period, ma_value, ma_values):
+    """
+    Modifikuje existující objednávku na základě nového klouzavého průměru.
+    """
+    ma_value = round_to_quarter(ma_value)
+    order.lmtPrice = ma_value
+
+    if order.action == 'BUY':
+        order.auxPrice = round_to_quarter(ma_value * (1 - ma_values['stop_loss']))
+    else:  # SELL
+        order.auxPrice = round_to_quarter(ma_value * (1 + ma_values['stop_loss']))
+
+    # Aktualizace objednávky
+    ib.modifyOrder(order, order)
+    print(f"Objednávka pro MA{ma_period} byla aktualizována s novým limitem: {ma_value}")
+
 
 
 # Hlavní smyčka
