@@ -349,7 +349,7 @@ def place_limit_order(action, instrument_type, ma_period, ma_value, ma_config, o
         take_profit_price = round_to_quarter(ma_value * (1 - ma_config['take_profit']))
 
     # Nastavte, jak dlouho má být objednávka platná (například 1 hodina)
-    expiration_time = datetime.now(timezone.utc) + timedelta(minutes=5)
+    expiration_time = datetime.now() + timedelta(minutes=5)
 
     # Formátujte datum a čas pro IB API
     expiration_time_str = expiration_time.strftime("%Y%m%d %H:%M:%S")
@@ -468,8 +468,8 @@ while True:
                 # None
                 place_limit_order('SELL', instrument_type, ma, ma_value, ma_config, opened_mas)
 
-
-
+        # opened_mas = []
+        # mas_without_orders = []
         # Počkejte 5 sekund před dalším během smyčky
         print("Čekám 5 sekund před dalším cyklem...")
         time.sleep(5)
