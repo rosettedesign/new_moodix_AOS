@@ -325,7 +325,7 @@ def place_limit_order(action, instrument_type, ma_period, ma_value, ma_config, o
 
     # Získejte aktuální cenu nástroje
     ticker = ib.reqMktData(contract)
-    ib.sleep(1)  # Počkejte chvíli, aby se data aktualizovala
+    ib.sleep(1)  # Počkejte chvíli, aby se data aktualizoval
     current_price = ticker.marketPrice()
     print("Cena ", current_price, "MA ", ma_value)
 
