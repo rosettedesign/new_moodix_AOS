@@ -26,25 +26,51 @@ config = {
     },
     'leverage': 4,
     'max_positions': 4,
-    'min_difference': 0.1, # v procentech
+    'min_difference': 0.1,  # v procentech
     'ma_configurations': {
-        72: {'take_profit': 0.02, 'stop_loss': 0.01}, # v procentech
-        144: {'take_profit': 0.03, 'stop_loss': 0.015}, # v procentech
-        288: {'take_profit': 0.04, 'stop_loss': 0.02}, # v procentech
-        720: {'take_profit': 0.05, 'stop_loss': 0.025}, # v procentech
+        72: {'take_profit': 0.02, 'stop_loss': 0.01},  # v procentech
+        144: {'take_profit': 0.03, 'stop_loss': 0.015},  # v procentech
+        288: {'take_profit': 0.04, 'stop_loss': 0.02},  # v procentech
+        720: {'take_profit': 0.05, 'stop_loss': 0.025},  # v procentech
     },
 }
 
-# Inicializace a připojení k IB
-ib = IB()
-try:
-    ib.connect('127.0.0.1', 7497, clientId=1)
-except ConnectionRefusedError:
-    print(
-        "Connection to Interactive Brokers refused. Please ensure TWS or IB Gateway is running and correctly configured.")
-    exit()
-except Exception as e:
-    print(f"Connection error: {e}")
+
+def reconnect(ib_instance):
+    if not ib_instance.isConnected():
+        print("Ztraceno připojení k IB API, pokouším se znovu připojit...")
+        try:
+            ib_instance.connect('127.0.0.1', 7497, clientId=1)
+            print("Připojení k IB API bylo obnoveno.")
+        except Exception as e:
+            print(f"Chyba při pokusu o opětovné připojení: {e}")
+
+
+def connect_to_ib():
+    ib = IB()
+    max_attempts = 100
+    attempt = 0
+
+    while attempt < max_attempts:
+        try:
+            ib.connect('127.0.0.1', 7497, clientId=1)
+            print("Připojení k Interactive Brokers bylo úspěšné.")
+            return ib
+        except ConnectionRefusedError:
+            print("Connection to Interactive Brokers refused. Waiting and retrying...")
+            attempt += 1
+            time.sleep(30)
+        except Exception as e:
+            print(f"Connection error: {e}")
+            return None
+
+    print("Překročen maximální počet pokusů o připojení k Interactive Brokers.")
+    return None
+
+
+# Připojit se k IB
+ib = connect_to_ib()
+if ib is None:
     exit()
 
 
@@ -65,7 +91,6 @@ ascii()
 # Získání přihlašovacích údajů od uživatele
 username = input("Zadejte vás e-mail : ")
 password = input("Zadejte heslo: ")
-
 
 
 def get_current_date_string():
@@ -260,7 +285,8 @@ def display_and_check_open_trades(config, open_trades):
     mas_without_orders = []
     print("------------------------------------------------------------------------")
     for ma in config['ma_configurations']:
-        if ma in opened_mas and any(trade.orderStatus.status in ['Submitted', 'Presubmitted'] for trade in opened_mas[ma]):
+        if ma in opened_mas and any(
+                trade.orderStatus.status in ['Submitted', 'Presubmitted'] for trade in opened_mas[ma]):
             print(f"Pro klouzavý průměr {ma} již existují otevřené obchody.")
         else:
             print(f"Pro klouzavý průměr {ma} neexistují žádné otevřené obchody.")
@@ -423,6 +449,8 @@ def get_contract_for_instrument(instrument):
 print("Spouštím hlavní smyčku...")
 while True:
     try:
+        # Zkontrolovat a obnovit připojení před každou operací, která vyžaduje komunikaci s IB API
+        reconnect(ib)
         # moodix sentiment
         sentiment, trend = get_market_sentiment(username, password)
         print("------------------------------------------------------------------------")
@@ -475,4 +503,5 @@ while True:
         time.sleep(5)
     except Exception as e:
         print(f"Chyba při komunikaci s brokerem na API: {e}")
+        reconnect(ib)  # Pokus o opětovné připojení, pokud došlo k chybě
         time.sleep(60)
