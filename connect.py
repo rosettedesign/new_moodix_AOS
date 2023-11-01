@@ -74,6 +74,30 @@ if ib is None:
     exit()
 
 
+#
+# def is_paper_accountm(ib_instance):
+#     account_summary = ib_instance.accountSummary()
+#     for item in account_summary:
+#         if item.tag == 'AccountType':
+#             return item.value == 'DU'  # DU znamená paper trading účet
+#     return False
+
+def is_paper_account(ib_instance):
+    managed_accounts = ib_instance.managedAccounts()
+    for account in managed_accounts:
+        if account.startswith('DU'):
+            print("Account type: Paper account")
+            return True  # DU znamená paper trading účet
+        elif account.startswith('U'):
+            print("Real account, not allowed!")
+    return False
+
+# Kontrola, zda jste připojeni k paper trading účtu
+if not is_paper_account(ib):
+    print("Chyba: Aplikace je určena pouze pro použití s paper trading účtem.")
+    exit()
+
+
 def ascii():
     print(" ▄▄   ▄▄ ▄▄▄▄▄▄▄ ▄▄▄▄▄▄▄ ▄▄▄▄▄▄  ▄▄▄ ▄▄   ▄▄ ")
     print(" █  █▄█  █       █       █      ██   █  █▄█  █ ")
