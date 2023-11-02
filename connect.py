@@ -441,7 +441,7 @@ def place_limit_order(action, instrument_type, ma_period, ma_value, ma_config, o
 def should_open_long(sentiment, trend):
     return (
             (sentiment == 'RiskOn' and trend in ['Growing', 'No trend', 'Sideways']) or
-            (sentiment == 'RiskOff' and trend in ['Sideways', 'Fading'])
+            (sentiment == 'RiskOff' and trend in ['Sideways', 'Fading', 'No trend'])
     )
 
 
