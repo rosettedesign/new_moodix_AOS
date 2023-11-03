@@ -74,14 +74,6 @@ if ib is None:
     exit()
 
 
-#
-# def is_paper_accountm(ib_instance):
-#     account_summary = ib_instance.accountSummary()
-#     for item in account_summary:
-#         if item.tag == 'AccountType':
-#             return item.value == 'DU'  # DU znamená paper trading účet
-#     return False
-
 def is_paper_account(ib_instance):
     managed_accounts = ib_instance.managedAccounts()
     for account in managed_accounts:
@@ -91,6 +83,7 @@ def is_paper_account(ib_instance):
         elif account.startswith('U'):
             print("Real account, not allowed!")
     return False
+
 
 # Kontrola, zda jste připojeni k paper trading účtu
 if not is_paper_account(ib):
@@ -116,6 +109,42 @@ ascii()
 username = input("Zadejte vás e-mail : ")
 password = input("Zadejte heslo: ")
 
+
+def select_account(ib_instance):
+    # Získat souhrn účtu
+    account_summary = ib_instance.accountSummary()
+
+    # Slovník pro uchování informací o účtech
+    account_info = {}
+
+    # Zpracování a uložení informací o účtu
+    for item in account_summary:
+        # Pokud ještě nebyl účet zpracován, přidáme ho do slovníku
+        if item.account not in account_info:
+            account_info[item.account] = {'TotalCashValue': 'Neznámý', 'Currency': 'Neznámá'}
+
+        # Aktualizace informací o účtu
+        if item.tag == 'TotalCashValue':
+            account_info[item.account]['TotalCashValue'] = item.value
+            account_info[item.account][
+                'Currency'] = item.currency  # Předpokládáme, že měna je poskytována v argumentu 'currency'
+
+    # Výpis dostupných obchodních účtů a jejich stavu
+    print("Seznam obchodních účtů a jejich stav:")
+    for account, info in account_info.items():
+        print(f"Účet: {account}, Stav účtu: {info['TotalCashValue']}, Měna: {info['Currency']}")
+
+    # Nechat uživatele vybrat účet
+    account_number = input("Zadejte číslo účtu na kterém se bude obchodovat: ")
+
+    # Uložit číslo účtu do konfigurace
+    config['account_number'] = account_number
+
+
+# Vybrat obchodní účet
+select_account(ib)
+
+print("Account number", config['account_number'])
 
 def get_current_date_string():
     current_date = datetime.now()
@@ -148,9 +177,23 @@ def get_market_sentiment(username, password):
 
 
 def calculate_trading_parameters():
-    # Získání informací o účtu
-    account_info = ib.accountSummary()
+    # Získání čísla účtu z konfigurace
+    account_number = config.get("account_number", None)
+
+    if not account_number:
+        print("Číslo účtu není nastaveno v konfiguraci.")
+        return None
+
+    # Získání informací o účtu pro konkrétní číslo účtu
+    account_info = ib.accountSummary(account_number)
     account_size = None
+
+    for item in account_info:
+        if item.tag == 'TotalCashValue' and item.account == account_number:
+            print(f"Velikost účtu: {item.value} {item.currency}")
+            account_size = float(item.value)
+        elif item.tag == 'MaintMarginReq' and item.account == account_number:
+            print(f"Využitý margin: {item.value} {item.currency}")
 
     for item in account_info:
         if item.tag == 'TotalCashValue':
@@ -420,6 +463,11 @@ def place_limit_order(action, instrument_type, ma_period, ma_value, ma_config, o
     bracket_order.parent.goodTillDate = expiration_time_str
 
     bracket_order.parent.orderRef = f"MA{ma_period}"
+
+    # # Nastavení subúčtu pro každou objednávku v bracketu
+    bracket_order.parent.account = config['account_number']  # Nastavení subúčtu pro parent objednávku
+    bracket_order.takeProfit.account = config['account_number']  # Nastavení subúčtu pro takeProfit objednávku
+    bracket_order.stopLoss.account = config['account_number']  # Nastavení subúčtu pro stopLoss objednávku
 
     main_trade = ib.placeOrder(contract, bracket_order.parent)
     ib.placeOrder(contract, bracket_order.takeProfit)
