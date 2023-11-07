@@ -1,19 +1,13 @@
-import time
-from ib_insync import IB, Future, util
-from collections import defaultdict
-from ib_insync import IB, Future
-from datetime import datetime
-from ib_insync import IB, Future
-from datetime import datetime, timedelta, timezone
-from ib_insync import Stock
-import pprint
-import pandas as pd
 import base64
+import re
+import time
+from collections import defaultdict
+from datetime import datetime, timedelta
+import pandas as pd
 import requests
-from collections import defaultdict
-import re
-from collections import defaultdict
-import re
+from ib_insync import CFD
+from ib_insync import IB, Future
+from ib_insync import util
 
 # Globální seznam pro sledování otevřených obchodů a jejich klouzavých průměrů
 open_trades = []
@@ -99,7 +93,7 @@ def ascii():
     print(" █       █  █▄█  █  █▄█  █ █▄█   █   ██     █  ")
     print(" █ ██▄██ █       █       █       █   █   ▄   █ ")
     print(" █▄█   █▄█▄▄▄▄▄▄▄█▄▄▄▄▄▄▄█▄▄▄▄▄▄██▄▄▄█▄▄█ █▄▄█ ")
-    print("..................................... ver. O.3")
+    print("..................................... ver. O.5")
     print("")
     print("")
 
@@ -231,7 +225,7 @@ def calculate_trading_parameters():
             # Získáme multiplikátor kontraktu
             long_contract = config['size_account'][selected_account_size]['long_contract']
             if instrument_type == 'SPY':
-                contract_size = 400
+                contract_size = 4000
             else:
                 contract_size = float(long_contract.multiplier) * 4000
 
@@ -259,7 +253,7 @@ def contracts_spec():
     for account_size, details in config['size_account'].items():
         contract_type = details['type']
         if contract_type == 'SPY':
-            spy_contract = Stock('SPY', 'SMART', 'USD')
+            spy_contract = CFD('IBUS500', 'smart', 'USD')
             config['size_account'][account_size]['long_contract'] = spy_contract
         elif contract_type in ['MES', 'ES']:
             # Pro futures MES a ES najdeme nejbližší dostupný kontrakt
@@ -279,7 +273,7 @@ def next_contracts_spec():
         long_contract = details.get('long_contract')
 
         if contract_type == 'SPY':
-            spy_contract = Stock('SPY', 'SMART', 'USD')
+            spy_contract = CFD('IBUS500', 'smart', 'USD')
             config['size_account'][account_size]['short_contract'] = spy_contract
         elif contract_type in ['MES', 'ES']:
             contract = Future(contract_type, exchange='CME')
@@ -386,7 +380,7 @@ def get_moving_averages(instrument, duration, end_date):
             endDateTime=end_date,
             durationStr=duration,
             barSizeSetting='10 mins',
-            whatToShow='TRADES',
+            whatToShow='MIDPOINT',
             useRTH=False
         )
         if not bars:
@@ -489,7 +483,8 @@ def place_limit_order(action, instrument_type, ma_period, ma_value, ma_config, o
 def should_open_long(sentiment, trend):
     return (
             (sentiment == 'RiskOn' and trend in ['Growing', 'No trend', 'Sideways']) or
-            (sentiment == 'RiskOff' and trend in ['Sideways', 'Fading', 'No trend'])
+            (sentiment == 'RiskOff' and trend in ['Sideways', 'Fading', 'No trend']) or
+            (sentiment == 'Neutral' and trend in ['No trend'])
     )
 
 
@@ -503,7 +498,8 @@ def round_to_quarter(value):
 
 def get_contract_for_instrument(instrument):
     if instrument == 'SPY':
-        return Stock('SPY', 'ARCA')
+        # return Stock('SPY', 'ARCA')
+        return CFD('IBUS500', 'smart', 'USD')
     elif instrument in ['MES', 'ES']:
         generic_contract = Future(instrument, exchange='CME')
         contracts = ib.reqContractDetails(generic_contract)
