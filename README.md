@@ -14,3 +14,22 @@ How to Use:
 - Run the code.
 - Input your email and password for the Moodix API.
 - The program will automatically monitor market sentiment and open trades.
+
+## Installation
+### Ubuntu 22.04 / WSL2 (default) on Windows
+```
+# Install the needed system packages
+apt install -y python3 git
+
+# Checkout the code
+git clone https://github.com/rosettedesign/new_moodix_AOS.git
+
+# Enter the code folder
+cd new_moodix_AOS
+
+# Install all Python packages
+pip3 install -r requirements.txt
+
+# Run the code
+python3 connect.py
+```
