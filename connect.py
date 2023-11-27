@@ -160,7 +160,7 @@ def is_trading_time():
         print("Trhy jsou otevřeny pro obchodování moodix sentimentu")
         return True
     else:
-        print("Trhy jsou zavřeny. Obchodování bude obnoveno v pondělí 8:00 UTC")
+        print("Trhy jsou zavřeny. Obchodování bude obnoveno v pondělí 8:00 UTC ")
         return False
 
 

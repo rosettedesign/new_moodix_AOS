@@ -32,7 +32,7 @@ def get_unfilled_bracket_orders(ib, ma_identifiers):
 
 def close_unfilled_bracket_orders(ib, ma_identifiers):
     """
-    Funkce uzavře všechny nevyplněné limitní 'bracket' objednávky.
+    Funkce uzavře všechny nevyplněné limitní 'bracket' objednávky .
     """
     unfilled_bracket_orders = get_unfilled_bracket_orders(ib, ma_identifiers)
     for order in unfilled_bracket_orders:

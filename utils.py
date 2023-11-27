@@ -27,7 +27,7 @@ def install_requirements(file_path='requirements.txt'):
     with open(file_path, 'r') as file:
         packages = [line.strip() for line in file if line.strip() and not line.startswith('#')]
 
-    print("\nKontrola nainstalovaných balíčků:")
+    print("\nKontrola nainstalovaných balíčků: ")
     for package in packages:
         try:
             # Kontrola, zda je balíček již nainstalován
