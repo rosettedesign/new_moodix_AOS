@@ -2,32 +2,24 @@ import base64
 import re
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta
 import pandas as pd
 import requests
 from ib_insync import CFD
-from ib_insync import IB, Future
+from ib_insync import IB, Future, Forex
 from ib_insync import util
+import datetime
+from datetime import timedelta, datetime, timezone
+from order import *
+from utils import *
+from config import *
+import subprocess
+import pkg_resources
+import csv
 
+# Zavolání funkce na začátku programu
+install_requirements()
 # Globální seznam pro sledování otevřených obchodů a jejich klouzavých průměrů
 open_trades = []
-
-config = {
-    'size_account': {
-        500: {'type': 'SPY'},
-        20000: {'type': 'MES'},
-        200000: {'type': 'ES'}
-    },
-    'leverage': 4,
-    'max_positions': 4,
-    'min_difference': 0.1,  # v procentech
-    'ma_configurations': {
-        72: {'take_profit': 0.02, 'stop_loss': 0.01},  # v procentech
-        144: {'take_profit': 0.03, 'stop_loss': 0.015},  # v procentech
-        288: {'take_profit': 0.04, 'stop_loss': 0.02},  # v procentech
-        720: {'take_profit': 0.05, 'stop_loss': 0.025},  # v procentech
-    },
-}
 
 
 def reconnect(ib_instance):
@@ -48,7 +40,7 @@ def connect_to_ib():
     while attempt < max_attempts:
         try:
             ib.connect('127.0.0.1', 7497, clientId=1)
-            print("Připojení k Interactive Brokers bylo úspěšné.")
+            print("\n\n>> Připojení k Interactive Brokers bylo úspěšné.")
             return ib
         except ConnectionRefusedError:
             print("Connection to Interactive Brokers refused. Waiting and retrying...")
@@ -68,40 +60,30 @@ if ib is None:
     exit()
 
 
-def is_paper_account(ib_instance):
-    managed_accounts = ib_instance.managedAccounts()
-    for account in managed_accounts:
-        if account.startswith('DU'):
-            print("Account type: Paper account")
-            return True  # DU znamená paper trading účet
-        elif account.startswith('U'):
-            print("Real account, not allowed!")
-    return False
-
-
 # Kontrola, zda jste připojeni k paper trading účtu
 if not is_paper_account(ib):
     print("Chyba: Aplikace je určena pouze pro použití s paper trading účtem.")
     exit()
 
-
-def ascii():
-    print(" ▄▄   ▄▄ ▄▄▄▄▄▄▄ ▄▄▄▄▄▄▄ ▄▄▄▄▄▄  ▄▄▄ ▄▄   ▄▄ ")
-    print(" █  █▄█  █       █       █      ██   █  █▄█  █ ")
-    print(" █       █   ▄   █   ▄   █  ▄    █   █       █ ")
-    print(" █       █  █ █  █  █ █  █ █ █   █   █       █ ")
-    print(" █       █  █▄█  █  █▄█  █ █▄█   █   ██     █  ")
-    print(" █ ██▄██ █       █       █       █   █   ▄   █ ")
-    print(" █▄█   █▄█▄▄▄▄▄▄▄█▄▄▄▄▄▄▄█▄▄▄▄▄▄██▄▄▄█▄▄█ █▄▄█ ")
-    print("..................................... ver. O.5")
-    print("")
-    print("")
-
-
 ascii()
 # Získání přihlašovacích údajů od uživatele
 username = input("Zadejte vás e-mail : ")
 password = input("Zadejte heslo: ")
+
+# Hlavní zpráva
+print_red("\n\nPro pokračování potvrď, že jsi zkontroloval nastavení (v souboru config.py) klouzavých průměrů.\n"
+          "Pro ES/MES (velké účty) je jiné než pro CFD (malé účty)!")
+
+while True:
+    odpoved = input("Odpověď (Yes/No): ").lower()
+    if odpoved == "yes" or odpoved == "y":
+        print("Ok, pokračujeme...\n")
+        break
+    elif odpoved == "no" or odpoved == "n":
+        print("Program ukončen, zkontroluj nastavení.")
+        break
+    else:
+        print_red("Špatně, musíš odpovědět Yes nebo No")
 
 
 def select_account(ib_instance):
@@ -140,6 +122,64 @@ select_account(ib)
 
 print("Account number", config['account_number'])
 
+
+def convert_to_usd(ib, amount, currency):
+    if currency == 'USD':
+        return amount
+
+    # Vytvoření objektu měnového páru
+    forex_pair = Forex('USD' + currency)
+
+    # Získání aktuálního času ve správném formátu pro endDateTime
+    end_time = datetime.now().strftime("%Y%m%d %H:%M:%S")
+    duration = '3600 S'  # Doba 1 hodina v sekundách
+    bars = ib.reqHistoricalData(forex_pair, endDateTime=end_time, durationStr=duration,
+                                barSizeSetting='1 hour', whatToShow='MIDPOINT', useRTH=True)
+
+    # Získání poslední svíčky a její uzavírací ceny
+    if bars:
+        last_candle = bars[-1]
+        close_price = last_candle.close
+        # print(f'Uzavírací cena poslední 1h svíčky pro {forex_pair}: {close_price}')
+
+        # Přepočítání částky
+        converted_amount = amount / close_price
+        print(f"Přepočtená velikost účtu na $ před pákou: \033[31m{converted_amount:.2f}\033[0m USD")
+        return converted_amount
+    else:
+        print(f"Nebyly nalezeny žádné svíčky pro {forex_pair} a nelze přepočítat")
+        return None
+
+
+def is_trading_time():
+    now = datetime.utcnow()
+    day = now.weekday()  # 0 je pondělí, 6 je neděle
+    hour = now.hour
+    # Kontrola, zda je čas v obchodních hodinách (Pondělí 8:00 UTC do Pátku 20:00 UTC)
+    if 0 <= day <= 4 and 1 <= hour < 23:
+        print("Trhy jsou otevřeny pro obchodování moodix sentimentu")
+        return True
+    else:
+        print("Trhy jsou zavřeny. Obchodování bude obnoveno v pondělí 8:00 UTC")
+        return False
+
+
+def wait_until_next_trading_period():
+    now = datetime.utcnow()
+    next_start = now + timedelta((7 - now.weekday()) % 7)  # Následující pondělí
+    next_start = next_start.replace(hour=8, minute=0, second=0, microsecond=0)  # Nastavení na 8:00 UTC
+
+    if now > next_start:
+        next_start += timedelta(days=7)  # Přeskočení na další týden, pokud jsme již po pondělí 8:00 UTC
+
+    while now < next_start:
+        wait_seconds = (next_start - now).total_seconds()
+        print(f"Čekání na další obchodní období: {int(wait_seconds)} sekund.", end='\r')
+        time.sleep(1)
+        now = datetime.utcnow()
+    print()
+
+
 def get_current_date_string():
     current_date = datetime.now()
     return current_date.strftime('%Y%m%d-23:00:00')
@@ -170,7 +210,18 @@ def get_market_sentiment(username, password):
         return None
 
 
-def calculate_trading_parameters():
+def get_sentiment_check(username, password):
+    url = 'https://app.moodix.market/api/algo-stat/1'
+    response = requests.get(url, auth=(username, password))
+    if response.status_code == 200:
+        data = response.json()
+        return data.get('sentiment_check', False)
+    else:
+        print("Error while fetching sentiment: ", response.status_code)
+        return False
+
+
+def calculate_trading_parameters(ib):
     # Získání čísla účtu z konfigurace
     account_number = config.get("account_number", None)
 
@@ -181,20 +232,31 @@ def calculate_trading_parameters():
     # Získání informací o účtu pro konkrétní číslo účtu
     account_info = ib.accountSummary(account_number)
     account_size = None
-
-    for item in account_info:
-        if item.tag == 'TotalCashValue' and item.account == account_number:
-            print(f"Velikost účtu: {item.value} {item.currency}")
-            account_size = float(item.value)
-        elif item.tag == 'MaintMarginReq' and item.account == account_number:
-            print(f"Využitý margin: {item.value} {item.currency}")
+    account_currency = None
 
     for item in account_info:
         if item.tag == 'TotalCashValue':
             print(f"Velikost účtu: {item.value} {item.currency}")
             account_size = float(item.value)
+            account_currency = item.currency
         elif item.tag == 'MaintMarginReq':
             print(f"Využitý margin: {item.value} {item.currency}")
+
+    # Kontrola měny a přepočet na USD, pokud je to potřeba
+    if account_currency and account_currency != 'USD':
+        account_size = convert_to_usd(ib, account_size, account_currency)
+        print(f"Velikost účtu po přepočtu na USD: {account_size:.2f} USD")
+
+        # Požádáme uživatele o možnou novou hodnotu
+        new_value = input(
+            "\n\n\033[31mZadejte novou hodnotu\033[0m pro velikost účtu (před pákou) v USD. \nHodí se, pokud "
+            "nechcete započítat celou velikost demo účtu do moodix obchodování  \n\nStiskněte Enter pro "
+            "pokračování s původní hodnotou: ")
+        if new_value:
+            try:
+                account_size = float(new_value)
+            except ValueError:
+                print("Neplatná hodnota, používá se původní hodnota.")
 
     if account_size is not None:
         sorted_account_sizes = sorted(config['size_account'].keys(), reverse=True)
@@ -214,13 +276,13 @@ def calculate_trading_parameters():
 
         if selected_account_size is not None:
             instrument_type = config['size_account'][selected_account_size]['type']
-            print(f"Pro obchodování bude použit typ instrumentu: {instrument_type}")
+            print(f"\n\nPro obchodování bude použit typ instrumentu: \033[31m{instrument_type}\033[0m")
 
             # Vypočítáme velikost účtu po páce
             leverage = config['leverage']
             leveraged_account_size = account_size * leverage
             config['leveraged_size_account'] = leveraged_account_size
-            print(f"Velikost účtu po aplikaci páky: {leveraged_account_size:.2f} {item.currency}")
+            print(f"Velikost účtu po aplikaci páky: \033[31m{leveraged_account_size:.2f}\033[0m USD")
 
             # Získáme multiplikátor kontraktu
             long_contract = config['size_account'][selected_account_size]['long_contract']
@@ -228,6 +290,9 @@ def calculate_trading_parameters():
                 contract_size = 4000
             else:
                 contract_size = float(long_contract.multiplier) * 4000
+
+            # Uložení config do CSV souboru
+            df.to_csv('config.csv', index=False)
 
             # Vypočítáme, kolik kontraktů můžeme mít otevřeno najednou
             total_contracts = round(leveraged_account_size / contract_size)
@@ -237,9 +302,11 @@ def calculate_trading_parameters():
             contracts_per_trade = round(total_contracts / max_positions)
             config['contracts_per_trade'] = contracts_per_trade
             print(
-                f"Pro obchodování s {instrument_type} můžeme mít celkem otevřených {total_contracts:.2f} kontraktů na celý účet.")
+                f"Pro obchodování s \033[31m{instrument_type}\033[0m můžeme mít celkem otevřených \033[31m{total_contracts:.2f}\033[0m kontraktů na celý účet.")
             print(
-                f"Pro obchodování s {instrument_type} můžeme mít otevřeno {contracts_per_trade:.2f} kontraktů na jeden obchod.")
+                f"Pro obchodování s \033[31m{instrument_type}\033[0m můžeme mít otevřeno \033[31m{contracts_per_trade:.2f}\033[0m kontraktů na jeden obchod.")
+            # Čekáme na uživatele, aby stiskl Enter
+            input("Stiskněte Enter pro pokračování...")
             return selected_account_size
         else:
             print("Účet je příliš malý, nelze určit typ instrumentu.")
@@ -325,6 +392,7 @@ def group_orders_by_parent(open_trades):
 
 def display_and_check_open_trades(config, open_trades):
     grouped_orders = group_orders_by_parent(open_trades)
+    print(grouped_orders)
     opened_mas = defaultdict(list)
 
     for parent_id, orders in grouped_orders.items():
@@ -344,10 +412,11 @@ def display_and_check_open_trades(config, open_trades):
 
     # Kontrola, zda pro každý klouzavý průměr již existuje otevřená objednávka
     mas_without_orders = []
+
     print("------------------------------------------------------------------------")
     for ma in config['ma_configurations']:
         if ma in opened_mas and any(
-                trade.orderStatus.status in ['Submitted', 'Presubmitted'] for trade in opened_mas[ma]):
+                trade.orderStatus.status in ['Submitted', 'Presubmitted', 'Inactive'] for trade in opened_mas[ma]):
             print(f"Pro klouzavý průměr {ma} již existují otevřené obchody.")
         else:
             print(f"Pro klouzavý průměr {ma} neexistují žádné otevřené obchody.")
@@ -402,7 +471,7 @@ def get_moving_averages(instrument, duration, end_date):
         return None
 
 
-def place_limit_order(action, instrument_type, ma_period, ma_value, ma_config, opened_mas):
+def place_limit_order(action, instrument_type, ma_period, ma_value, ma_config, opened_mas, next_ma):
     print("------------------------------------------------------------------------")
     if ma_period in opened_mas and opened_mas[ma_period]:
         print(f"Pro klouzavý průměr {ma_period} již existuje otevřená objednávka. Nová objednávka nebude umístěna.")
@@ -426,6 +495,23 @@ def place_limit_order(action, instrument_type, ma_period, ma_value, ma_config, o
         print("Aktuální cena je příliš blízko nebo nad klouzavým průměrem, objednávka nebude odeslána.")
         return
 
+    # kontrola pro největší průměr
+    if action == 'BUY' and ma_period == config['max_ma']:
+        next_ma -= 30
+    elif action == 'SELL' and ma_period == config['max_ma']:
+        next_ma += 30
+
+    print("MA: ", (ma_value - config['ma_configurations'][ma_period]['distance']), "next ma: ", next_ma)
+
+    if action == 'BUY' and (ma_value - config['ma_configurations'][ma_period]['distance']) < next_ma:
+        print(
+            "Aktuální cena klouzavého průměru je příliš blízko následujícímu klouzavému průměru, objednávka nebude odeslána.")
+        return
+    elif action == 'SELL' and (ma_value + config['ma_configurations'][ma_period]['distance']) > next_ma:
+        print(
+            "Aktuální cena klouzavého průměru je příliš blízko následujícímu klouzavému průměru, objednávka nebude odeslána.")
+        return
+
     ma_value = round_to_quarter(ma_value)
 
     if action == 'BUY':
@@ -436,7 +522,7 @@ def place_limit_order(action, instrument_type, ma_period, ma_value, ma_config, o
         take_profit_price = round_to_quarter(ma_value * (1 - ma_config['take_profit']))
 
     # Nastavte, jak dlouho má být objednávka platná (například 1 hodina)
-    expiration_time = datetime.now() + timedelta(minutes=5)
+    expiration_time = datetime.now() + timedelta(minutes=15)
 
     # Formátujte datum a čas pro IB API
     expiration_time_str = expiration_time.strftime("%Y%m%d %H:%M:%S")
@@ -513,63 +599,85 @@ def get_contract_for_instrument(instrument):
         raise ValueError(f"Neznámý instrument: {instrument}")
 
 
+# nastaveni uctu
+print("Nastavení obchodního účtu ...")
+contracts_spec()
+next_contracts_spec()
+selected_account_size = calculate_trading_parameters(ib)
+
 # Hlavní smyčka
 print("Spouštím hlavní smyčku...")
 while True:
-    try:
-        # Zkontrolovat a obnovit připojení před každou operací, která vyžaduje komunikaci s IB API
-        reconnect(ib)
-        # moodix sentiment
-        sentiment, trend = get_market_sentiment(username, password)
-        print("------------------------------------------------------------------------")
-        print(f"Aktuální sentiment: {sentiment}, trend: {trend}")
-        if sentiment is None:
-            print("Nepodařilo se načíst sentiment. Čekám na další pokus.")
-            time.sleep(60)
-            continue
-        print("------------------------------------------------------------------------")
-        # nastaveni uct
-        contracts_spec()
-        next_contracts_spec()
-        selected_account_size = calculate_trading_parameters()
+    if is_trading_time():
+        sentiment_state = get_sentiment_check(username, password)
+        if sentiment_state:
+            print("Kontrola systémů: ", "\033[92m V pořádku \033[0m")
+            try:
+                # Zkontrolovat a obnovit připojení před každou operací, která vyžaduje komunikaci s IB API
+                reconnect(ib)
+                # moodix sentiment
+                sentiment, trend = get_market_sentiment(username, password)
+                print("------------------------------------------------------------------------")
+                print(f"Aktuální sentiment: {sentiment}, trend: {trend}")
+                if sentiment is None:
+                    print("Nepodařilo se načíst sentiment. Čekám na další pokus.")
+                    time.sleep(60)
+                    continue
+                print("------------------------------------------------------------------------")
+                # # nastaveni uct
+                # contracts_spec()
+                # next_contracts_spec()
+                # selected_account_size = calculate_trading_parameters(ib)
 
-        # Získání informací o otevřených obchodech
-        open_trades = ib.openTrades()
-        grouped_orders = group_orders_by_parent(open_trades)
-        display_grouped_orders(grouped_orders)
+                # Získání informací o otevřených obchodech
+                open_trades = ib.openTrades()
+                grouped_orders = group_orders_by_parent(open_trades)
+                display_grouped_orders(grouped_orders)
 
-        # Zobrazení a kontrola otevřených obchodů
-        mas_without_orders, opened_mas = display_and_check_open_trades(config, open_trades)
+                # Zobrazení a kontrola otevřených obchodů
+                mas_without_orders, opened_mas = display_and_check_open_trades(config, open_trades)
 
-        # Kontrola, zda byl vybrán typ účtu
-        if selected_account_size is None:
-            print("Chyba: Velikost účtu je příliš malá nebo se nepodařilo získat informace o účtu.")
-            time.sleep(60)
-            continue
+                # Kontrola, zda byl vybrán typ účtu
+                if selected_account_size is None:
+                    print("Chyba: Velikost účtu je příliš malá nebo se nepodařilo získat informace o účtu.")
+                    time.sleep(60)
+                    continue
 
-        # Získání hodnot klouzavých průměrů
-        instrument_type = config['size_account'][selected_account_size]['type']
-        ma_values = get_moving_averages(instrument_type, '10 D', get_current_date_string())
+                # Získání hodnot klouzavých průměrů
+                instrument_type = config['size_account'][selected_account_size]['type']
+                ma_values = get_moving_averages(instrument_type, '10 D', get_current_date_string())
 
-        # Položení objednávek pro klouzavé průměry bez otevřených pozic
-        for ma in mas_without_orders:
-            # ma_value = ma_values[f'MA{ma}'].iloc[-1]
-            ma_config = config['ma_configurations'][ma]
-            ma_value = ma_values[ma]
+                # Položení objednávek pro klouzavé průměry bez otevřených pozic
+                for ma in mas_without_orders:
+                    # ma_value = ma_values[f'MA{ma}'].iloc[-1]
+                    ma_config = config['ma_configurations'][ma]
+                    ma_value = ma_values[ma]
+                    next_ma = config['ma_configurations'][ma]['next']
+                    next_ma_value = ma_values[next_ma]
 
-            if should_open_long(sentiment, trend):
-                # None
-                place_limit_order('BUY', instrument_type, ma, ma_value, ma_config, opened_mas)
-            elif should_open_short(sentiment, trend):
-                # None
-                place_limit_order('SELL', instrument_type, ma, ma_value, ma_config, opened_mas)
+                    if should_open_long(sentiment, trend):
+                        # None
+                        place_limit_order('BUY', instrument_type, ma, ma_value, ma_config, opened_mas, next_ma_value)
+                    elif should_open_short(sentiment, trend):
+                        # None
+                        place_limit_order('SELL', instrument_type, ma, ma_value, ma_config, opened_mas, next_ma_value)
 
-        # opened_mas = []
-        # mas_without_orders = []
-        # Počkejte 5 sekund před dalším během smyčky
-        print("Čekám 5 sekund před dalším cyklem...")
-        time.sleep(5)
-    except Exception as e:
-        print(f"Chyba při komunikaci s brokerem na API: {e}")
-        reconnect(ib)  # Pokus o opětovné připojení, pokud došlo k chybě
-        time.sleep(60)
+                # opened_mas = []
+                # mas_without_orders = []
+                # Počkejte 5 sekund před dalším během smyčky
+                print("Čekám 5 sekund před dalším cyklem...")
+                time.sleep(5)
+            except Exception as e:
+                print(f"Chyba při komunikaci s brokerem na API: {e}")
+                reconnect(ib)  # Pokus o opětovné připojení, pokud došlo k chybě
+                time.sleep(60)
+            pass
+        else:
+            print("Kontrola systémů:", "\033[31m Pozastaveno \033[0m")
+            print("Pozastaveno ze strany aplikace moodix z důvodu očekávání macro události nebo jiného důvodu")
+            # Získání identifikátorů klouzavých průměrů z konfigurace
+            ma_identifiers = list(config['ma_configurations'].keys())
+            close_unfilled_bracket_orders(ib, ma_identifiers)
+            time.sleep(60)  # Pauza na 60 sekund
+    else:
+        wait_until_next_trading_period()
