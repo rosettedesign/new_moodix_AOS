@@ -676,8 +676,8 @@ while True:
             print("Kontrola systémů:", "\033[31m Pozastaveno \033[0m")
             print("Pozastaveno ze strany aplikace moodix z důvodu očekávání macro události nebo jiného důvodu")
             # Získání identifikátorů klouzavých průměrů z konfigurace
-            ma_identifiers = list(config['ma_configurations'].keys())
-            close_unfilled_bracket_orders(ib, ma_identifiers)
+            # ma_identifiers = list(config['ma_configurations'].keys())
+            #close_unfilled_bracket_orders(ib, ma_identifiers)
             time.sleep(60)  # Pauza na 60 sekund
     else:
         wait_until_next_trading_period()
