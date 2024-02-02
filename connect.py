@@ -59,7 +59,6 @@ ib = connect_to_ib()
 if ib is None:
     exit()
 
-
 # Kontrola, zda jste připojeni k paper trading účtu
 if not is_paper_account(ib):
     print("Chyba: Aplikace je určena pouze pro použití s paper trading účtem.")
@@ -156,28 +155,13 @@ def is_trading_time():
     day = now.weekday()  # 0 je pondělí, 6 je neděle
     hour = now.hour
     # Kontrola, zda je čas v obchodních hodinách (Pondělí 8:00 UTC do Pátku 20:00 UTC)
-    if 0 <= day <= 4 and 1 <= hour < 23:
+    if 0 <= day <= 4 and 1 <= hour < 21:
         print("Trhy jsou otevřeny pro obchodování moodix sentimentu")
         return True
     else:
-        print("Trhy jsou zavřeny. Obchodování bude obnoveno v pondělí 8:00 UTC ")
+        print("Trhy jsou zavřeny.")
         return False
 
-
-def wait_until_next_trading_period():
-    now = datetime.utcnow()
-    next_start = now + timedelta((7 - now.weekday()) % 7)  # Následující pondělí
-    next_start = next_start.replace(hour=8, minute=0, second=0, microsecond=0)  # Nastavení na 8:00 UTC
-
-    if now > next_start:
-        next_start += timedelta(days=7)  # Přeskočení na další týden, pokud jsme již po pondělí 8:00 UTC
-
-    while now < next_start:
-        wait_seconds = (next_start - now).total_seconds()
-        print(f"Čekání na další obchodní období: {int(wait_seconds)} sekund.", end='\r')
-        time.sleep(1)
-        now = datetime.utcnow()
-    print()
 
 
 def get_current_date_string():
@@ -287,7 +271,7 @@ def calculate_trading_parameters(ib):
             # Získáme multiplikátor kontraktu
             long_contract = config['size_account'][selected_account_size]['long_contract']
             if instrument_type == 'SPY':
-                contract_size = 4000
+                contract_size = 4000.0
             else:
                 contract_size = float(long_contract.multiplier) * 4000
 
@@ -300,6 +284,9 @@ def calculate_trading_parameters(ib):
             # Vypočítáme, kolik kontraktů můžeme mít na jeden obchod
             max_positions = config['max_positions']
             contracts_per_trade = round(total_contracts / max_positions)
+            if contracts_per_trade == 0:
+                contracts_per_trade = 1
+
             config['contracts_per_trade'] = contracts_per_trade
             print(
                 f"Pro obchodování s \033[31m{instrument_type}\033[0m můžeme mít celkem otevřených \033[31m{total_contracts:.2f}\033[0m kontraktů na celý účet.")
@@ -380,6 +367,17 @@ def display_grouped_orders(grouped_orders):
         print()
 
 
+def cancel_bracket_orders(grouped_orders):
+    for parent_id, orders in grouped_orders.items():
+        for trade in orders:
+            # Získání ID objednávky
+            order_id = trade.order.orderId
+
+            # Zrušení objednávky
+            ib.cancelOrder(order_id)
+            print(f"Objednávka s ID {order_id} byla zrušena.")
+
+
 def group_orders_by_parent(open_trades):
     grouped_orders = defaultdict(list)
     for trade in open_trades:
@@ -392,7 +390,7 @@ def group_orders_by_parent(open_trades):
 
 def display_and_check_open_trades(config, open_trades):
     grouped_orders = group_orders_by_parent(open_trades)
-    print(grouped_orders)
+    #print(grouped_orders)
     opened_mas = defaultdict(list)
 
     for parent_id, orders in grouped_orders.items():
@@ -413,21 +411,20 @@ def display_and_check_open_trades(config, open_trades):
     # Kontrola, zda pro každý klouzavý průměr již existuje otevřená objednávka
     mas_without_orders = []
 
-    print("------------------------------------------------------------------------")
-    for ma in config['ma_configurations']:
-        if ma in opened_mas and any(
-                trade.orderStatus.status in ['Submitted', 'Presubmitted', 'Inactive'] for trade in opened_mas[ma]):
-            print(f"Pro klouzavý průměr {ma} již existují otevřené obchody.")
-        else:
-            print(f"Pro klouzavý průměr {ma} neexistují žádné otevřené obchody.")
-            mas_without_orders.append(ma)
+    for ma in config['ma_configurations'].keys():
+        if ma in opened_mas:
+            if any(trade.orderStatus.status in ['Submitted', 'Presubmitted', 'Inactive', 'PendingCancel'] for trade in opened_mas[ma]):
+                print(f"Pro klouzavý průměr {ma} již existují otevřené obchody.")
+                continue
+        print(f"Pro klouzavý průměr {ma} neexistují žádné otevřené obchody.")
+        mas_without_orders.append(ma)
 
     return mas_without_orders, opened_mas
 
 
 def extract_moving_average_from_order_ref(order_ref):
     if order_ref is not None and isinstance(order_ref, str):
-        ma_match = re.search(r'MA(\d+)', order_ref)
+        ma_match = re.search(r'(\d+)', order_ref)
         if ma_match:
             return int(ma_match.group(1))
     return None
@@ -438,7 +435,7 @@ def get_moving_averages(instrument, duration, end_date):
     print(f"Získávání klouzavých průměrů pro {instrument}...")
     contract = get_contract_for_instrument(instrument)
 
-    print(f"Kontrakt pro získání klouzavých průměrů: {contract}")
+    print(f"Kontrakt pro získání klouzavých průměrů: {contract.localSymbol}")
     print(f"Délka historie: {duration}")
     print(f"Konečné datum a čas: {end_date}")
     print(f"Velikost svíčky: 10 mins")
@@ -460,7 +457,7 @@ def get_moving_averages(instrument, duration, end_date):
 
         ma_values = {}
         for ma_period in config['ma_configurations'].keys():
-            ma_column_name = f'MA{ma_period}'
+            ma_column_name = f'{ma_period}'
             df[ma_column_name] = df['close'].rolling(window=ma_period).mean()
             ma_values[ma_period] = df[ma_column_name].iloc[-1]
             print(f"Klouzavý průměr {ma_period}: {ma_values[ma_period]}")
@@ -534,7 +531,7 @@ def place_limit_order(action, instrument_type, ma_period, ma_value, ma_config, o
         takeProfitPrice=take_profit_price,
         stopLossPrice=stop_loss_price,
         outsideRth=True,
-        orderRef=f"MA{ma_period}",
+        orderRef=f"{ma_period}",
         tif='GTC'
     )
 
@@ -542,7 +539,7 @@ def place_limit_order(action, instrument_type, ma_period, ma_value, ma_config, o
     bracket_order.parent.tif = 'GTD'
     bracket_order.parent.goodTillDate = expiration_time_str
 
-    bracket_order.parent.orderRef = f"MA{ma_period}"
+    bracket_order.parent.orderRef = f"{ma_period}"
 
     # # Nastavení subúčtu pro každou objednávku v bracketu
     bracket_order.parent.account = config['account_number']  # Nastavení subúčtu pro parent objednávku
@@ -558,7 +555,7 @@ def place_limit_order(action, instrument_type, ma_period, ma_value, ma_config, o
         if main_trade.orderStatus.status in ['Submitted', 'Filled']:
             break
 
-    if main_trade.orderStatus.status in ['Submitted', 'Filled']:
+    if main_trade.orderStatus.status in ['Submitted', 'Filled', 'PendingSubmit']:
         print(f"Obchod {action} na {instrument_type} s klouzavým průměrem {ma_period} byl otevřen.")
         return main_trade
     else:
@@ -568,14 +565,21 @@ def place_limit_order(action, instrument_type, ma_period, ma_value, ma_config, o
 
 def should_open_long(sentiment, trend):
     return (
-            (sentiment == 'RiskOn' and trend in ['Growing', 'No trend', 'Sideways']) or
-            (sentiment == 'RiskOff' and trend in ['Sideways', 'Fading', 'No trend']) or
-            (sentiment == 'Neutral' and trend in ['No trend'])
+            (sentiment == 'RiskOn' and trend in ['Growing', 'Sideways']) or
+            (sentiment == 'RiskOff' and trend in ['Fading'])
     )
 
 
 def should_open_short(sentiment, trend):
     return sentiment == 'RiskOff' and trend == 'Growing'
+
+
+def is_long_trades_enabled():
+    return config['long_trades']
+
+
+def is_short_trades_enabled():
+    return config['short_trades']
 
 
 def round_to_quarter(value):
@@ -649,18 +653,27 @@ while True:
 
                 # Položení objednávek pro klouzavé průměry bez otevřených pozic
                 for ma in mas_without_orders:
+                    # print(mas_without_orders)
                     # ma_value = ma_values[f'MA{ma}'].iloc[-1]
                     ma_config = config['ma_configurations'][ma]
+                    # print(ma_config)
                     ma_value = ma_values[ma]
                     next_ma = config['ma_configurations'][ma]['next']
                     next_ma_value = ma_values[next_ma]
+                    # print(next_ma_value)
 
                     if should_open_long(sentiment, trend):
-                        # None
-                        place_limit_order('BUY', instrument_type, ma, ma_value, ma_config, opened_mas, next_ma_value)
+                        if is_long_trades_enabled:
+                            place_limit_order('BUY', instrument_type, ma, ma_value, ma_config, opened_mas, next_ma_value)
+                        else:
+                            print("Long trades not allowed")
+                            break
                     elif should_open_short(sentiment, trend):
-                        # None
-                        place_limit_order('SELL', instrument_type, ma, ma_value, ma_config, opened_mas, next_ma_value)
+                        if is_short_trades_enabled():
+                            place_limit_order('SELL', instrument_type, ma, ma_value, ma_config, opened_mas, next_ma_value)
+                        else:
+                            print("Short trades not allowed")
+                            break
 
                 # opened_mas = []
                 # mas_without_orders = []
@@ -674,10 +687,14 @@ while True:
             pass
         else:
             print("Kontrola systémů:", "\033[31m Pozastaveno \033[0m")
-            print("Pozastaveno ze strany aplikace moodix z důvodu očekávání macro události nebo jiného důvodu")
-            # Získání identifikátorů klouzavých průměrů z konfigurace
-            # ma_identifiers = list(config['ma_configurations'].keys())
-            #close_unfilled_bracket_orders(ib, ma_identifiers)
-            time.sleep(60)  # Pauza na 60 sekund
+            print("Pozastaveno na 5 minut ze strany aplikace moodix z důvodu očekávání macro události nebo jiného důvodu")
+            # Získání informací o otevřených obchodech
+            # open_trades = ib.openTrades()
+            # grouped_orders = group_orders_by_parent(open_trades)
+            # cancel_bracket_orders(grouped_orders)
+            time.sleep(300)  # Pauza na 60 sekund
     else:
-        wait_until_next_trading_period()
+
+        print("Čekám 5 min. ...")
+        time.sleep(360)
+
