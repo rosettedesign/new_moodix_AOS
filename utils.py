@@ -17,7 +17,7 @@ def ascii():
     print(" █       █  █▄█  █  █▄█  █ █▄█   █   ██     █  ")
     print(" █ ██▄██ █       █       █       █   █   ▄   █ ")
     print(" █▄█   █▄█▄▄▄▄▄▄▄█▄▄▄▄▄▄▄█▄▄▄▄▄▄██▄▄▄█▄▄█ █▄▄█ ")
-    print("..................................... ver. O.71")
+    print("..................................... ver. O.74")
     print("> Not intended for live trading!")
     print("> Created for study purposes of moodix \nAPI connection options!")
     print("______________________________________________\n\n")
