@@ -151,7 +151,7 @@ def convert_to_usd(ib, amount, currency):
 
 
 def is_trading_time():
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     day = now.weekday()  # 0 je pondělí, 6 je neděle
     hour = now.hour
     # Kontrola, zda je čas v obchodních hodinách (Pondělí 8:00 UTC do Pátku 20:00 UTC)
